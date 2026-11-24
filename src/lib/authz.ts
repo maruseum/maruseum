@@ -35,6 +35,16 @@ export function canReassign(actor: Actor): boolean {
   return actor.role === "admin" || actor.role === "manager";
 }
 
+/** 통화 녹음 열람: 관리자, 올린 본인, 연결된 고객을 볼 수 있는 직원 */
+export function canViewRecording(
+  actor: Actor,
+  rec: { uploadedBy: string | null },
+  customerAssignee: AssigneeRef | null,
+): boolean {
+  if (actor.role === "admin" || rec.uploadedBy === actor.id) return true;
+  return customerAssignee !== null && canViewCustomer(actor, customerAssignee);
+}
+
 /** 물건 수정: 관리자·팀장, 담당자, 등록자 (물건 열람은 전 직원 공유) */
 export function canEditProperty(actor: Actor, p: { assigneeId: string | null; createdBy: string | null }): boolean {
   return actor.role !== "agent" || p.assigneeId === actor.id || p.createdBy === actor.id;

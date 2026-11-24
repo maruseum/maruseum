@@ -13,6 +13,8 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// api/recordings 는 제외: proxy 는 요청 본문을 10MB 까지만 버퍼링하므로 큰 녹음 파일이 잘립니다.
+// 해당 경로는 핸들러에서 직접 로그인을 확인합니다.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/recordings|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)"],
 };

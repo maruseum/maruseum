@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { db, pool } from "@/db";
-import { customerNeeds, customers, properties, proposals, teams, users } from "@/db/schema";
+import { execFile } from "node:child_process";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { customerNeeds, customers, interactions, properties, proposals, recordings, tasks, teams, users } from "@/db/schema";
+import { parseCallFileName } from "@/lib/calls/filename";
+import { applyToCustomer, processRecording } from "@/lib/calls/process";
+import { findCustomerForCall } from "@/lib/calls/queries";
 import { canViewCustomer, customerScope, type Actor } from "@/lib/authz";
 import { commitImport, previewImport } from "@/lib/import/preview";
 import { matchesForCustomer, matchesForProperty } from "@/lib/match-queries";
@@ -168,6 +176,71 @@ describe.runIf(hasDb)("DB 통합", () => {
     // 물건 쪽에서 보면: 직원B 는 직원A 고객을 볼 수 없음
     const fromB = await matchesForProperty(actors.agentB, { ...cheap });
     expect(fromB.find((m) => m.customer.id === c.id)).toBeUndefined();
+  });
+
+  it("통화 녹음: 파일명으로 고객 자동 연결 → 인식·요약 → 상담 기록·할 일 (한 번만)", async () => {
+    process.env.STT_PROVIDER = "mock";
+    process.env.SUMMARY_PROVIDER = "mock";
+    const dir = await mkdtemp(path.join(tmpdir(), "maru-rec-"));
+    process.env.RECORDINGS_DIR = dir;
+    // ffmpeg 로 1초짜리 m4a 생성
+    await promisify(execFile)("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "aac", path.join(dir, "t.m4a")]);
+
+    const [c] = await db
+      .insert(customers)
+      .values({ name: "녹음고객", phone: "010-2468-1357", assigneeId: actors.agentA.id, lastContactedAt: null })
+      .returning();
+
+    // 번호로 연결 (내 담당 고객만)
+    const byPhone = parseCallFileName("통화 녹음 01024681357_241120_101500.m4a");
+    expect(await findCustomerForCall(actors.agentA, byPhone)).toBe(c.id);
+    expect(await findCustomerForCall(actors.agentB, byPhone)).toBeNull(); // 다른 팀 직원은 연결 안 됨
+    expect(await findCustomerForCall(actors.agentA, parseCallFileName("통화 녹음 녹음 고객_241120_101500.m4a"))).toBe(c.id);
+
+    const [rec] = await db
+      .insert(recordings)
+      .values({
+        uploadedBy: actors.agentA.id,
+        customerId: c.id,
+        fileName: "통화 녹음 01024681357_241120_101500.m4a",
+        storageKey: "t.m4a",
+        sizeBytes: 1000,
+        recordedAt: byPhone.recordedAt,
+      })
+      .returning();
+
+    await processRecording(rec.id);
+    const [done] = await db.select().from(recordings).where(eq(recordings.id, rec.id));
+    expect(done.status).toBe("done");
+    expect(done.durationSec).toBe(1);
+    expect(done.transcript).toContain("평택 포승");
+    expect(done.interactionId).not.toBeNull();
+
+    const [it] = await db.select().from(interactions).where(eq(interactions.id, done.interactionId!));
+    expect(it).toMatchObject({ kind: "call", customerId: c.id, title: "평택 포승 부지 예산 부담, 다음 주 화요일 임장 약속" });
+    expect(it.occurredAt.toISOString()).toBe(byPhone.recordedAt!.toISOString());
+    const made = await db.select().from(tasks).where(eq(tasks.customerId, c.id));
+    expect(made.map((t) => t.title).sort()).toEqual(["포승 부지 임장 (오후 2시)", "포승 부지 토지이용계획확인원·전력 인입 가능 여부 보내기"]);
+    expect(made.every((t) => t.assigneeId === actors.agentA.id)).toBe(true);
+    const [after] = await db.select().from(customers).where(eq(customers.id, c.id));
+    expect(after.lastContactedAt?.toISOString()).toBe(byPhone.recordedAt!.toISOString());
+
+    // 다시 반영해도, 다시 처리해도 중복 생성 없음
+    expect(await applyToCustomer(rec.id)).toBe(false);
+    await processRecording(rec.id); // done 상태라 처리권을 얻지 못함
+    expect(await db.select().from(tasks).where(eq(tasks.customerId, c.id))).toHaveLength(2);
+    expect(await db.select().from(interactions).where(eq(interactions.customerId, c.id))).toHaveLength(1);
+  });
+
+  it("통화 녹음: 음성 파일이 없으면 실패 상태와 안내 문구", async () => {
+    const [rec] = await db
+      .insert(recordings)
+      .values({ uploadedBy: actors.agentA.id, fileName: "x.m4a", storageKey: null, sizeBytes: 1 })
+      .returning();
+    await processRecording(rec.id);
+    const [r] = await db.select().from(recordings).where(eq(recordings.id, rec.id));
+    expect(r.status).toBe("failed");
+    expect(r.error).toMatch(/음성 파일이 삭제/);
   });
 
   it("동시에 저장해도 버전 번호가 겹치지 않는다", async () => {

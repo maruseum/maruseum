@@ -12,6 +12,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     { href: "/customers/board", label: "파이프라인" },
     { href: "/properties", label: "물건" },
     { href: "/matching", label: "매칭" },
+    { href: "/calls", label: "통화 녹음" },
     { href: "/tasks", label: "할 일" },
     { href: "/import", label: "엑셀 가져오기" },
   ];

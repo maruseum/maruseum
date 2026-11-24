@@ -250,6 +250,50 @@ export const proposals = pgTable(
 );
 
 export type Proposal = typeof proposals.$inferSelect;
+
+// ─── 통화 녹음 (업로드 → 음성 인식 → AI 요약 → 고객 기록) ─────────
+
+export const recordingStatus = pgEnum("recording_status", [
+  "uploaded",
+  "transcribing",
+  "summarizing",
+  "done",
+  "failed",
+]);
+
+export const recordings = pgTable(
+  "recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    fileName: text("file_name").notNull(),
+    /** 저장소 안 경로. 보관 기간이 지나 음성 파일을 지우면 null */
+    storageKey: text("storage_key"),
+    mimeType: text("mime_type"),
+    sizeBytes: integer("size_bytes").notNull(),
+    durationSec: integer("duration_sec"),
+    /** 파일명에서 읽은 통화 상대 (갤럭시: "통화 녹음 홍길동_231124_143012.m4a") */
+    contactLabel: text("contact_label"),
+    contactPhone: text("contact_phone"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }),
+    status: recordingStatus("status").notNull().default("uploaded"),
+    error: text("error"),
+    transcript: text("transcript"),
+    summary: jsonb("summary"),
+    /** 요약을 고객 기록에 반영하며 만든 상담 기록 */
+    interactionId: uuid("interaction_id").references(() => interactions.id, { onDelete: "set null" }),
+    needsAppliedAt: timestamp("needs_applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("recordings_customer_idx").on(t.customerId, t.recordedAt),
+    index("recordings_uploader_idx").on(t.uploadedBy, t.createdAt),
+  ],
+);
+
+export type Recording = typeof recordings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
 export type Customer = typeof customers.$inferSelect;

@@ -5,7 +5,11 @@ import { db } from "@/db";
 import { interactions, properties, tasks, users } from "@/db/schema";
 import { ActionForm } from "@/components/action-form";
 import { NeedsFields } from "@/components/forms";
+import { AutoRefresh } from "@/components/auto-refresh";
+import { CallUploader } from "@/components/call-uploader";
 import { PropertyMatchList } from "@/components/match-list";
+import { isProcessing, RecordingList } from "@/components/recording-list";
+import { listRecordings } from "@/lib/calls/queries";
 import { matchesForCustomer } from "@/lib/match-queries";
 import { TaskList } from "@/components/task-list";
 import { Badge, ButtonLink, Card, DescList, Empty, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
@@ -75,7 +79,10 @@ export default async function CustomerDetailPage({ params }: PageProps<"/custome
 
   const current = history[0]?.needs ?? null;
   const snapshots = history.map((h) => toSnapshot(h.needs));
-  const matches = current ? await matchesForCustomer(id, snapshots[0]) : [];
+  const [matches, calls] = await Promise.all([
+    current ? matchesForCustomer(id, snapshots[0]) : Promise.resolve([]),
+    listRecordings(user, { customerId: id, limit: 20 }),
+  ]);
 
   return (
     <>
@@ -226,6 +233,11 @@ export default async function CustomerDetailPage({ params }: PageProps<"/custome
         </div>
 
         <div className="space-y-6">
+          <Card title="통화 녹음" actions={<CallUploader customerId={id} compact />}>
+            <AutoRefresh active={calls.some((c) => isProcessing(c.status))} />
+            <RecordingList rows={calls} showCustomer={false} />
+          </Card>
+
           <Card title="진행 단계">
             <ActionForm action={updateStage.bind(null, id)} submitLabel="변경" className="flex flex-wrap items-center gap-2">
               <Select name="stage" options={entries(CUSTOMER_STAGE_LABEL)} defaultValue={c.stage} className="w-auto" />

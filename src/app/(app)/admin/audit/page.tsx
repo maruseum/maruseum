@@ -20,6 +20,11 @@ const ACTION_LABEL: Record<string, string> = {
   propose: "물건 제안",
   proposal_status: "제안 반응",
   import: "엑셀 가져오기",
+  upload: "녹음 업로드",
+  listen: "녹음 재생",
+  link_customer: "녹음 고객 연결",
+  reprocess: "녹음 재처리",
+  delete_audio: "녹음 음성 삭제",
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -28,6 +33,7 @@ const ENTITY_LABEL: Record<string, string> = {
   customer: "고객",
   property: "물건",
   task: "할 일",
+  recording: "통화 녹음",
 };
 
 export default async function AuditPage() {
