@@ -223,6 +223,33 @@ export const tasks = pgTable(
   (t) => [index("tasks_assignee_idx").on(t.assigneeId, t.status, t.dueAt)],
 );
 
+// ─── 물건 제안 (매칭 결과를 고객에게 제안한 기록과 반응) ─────────
+
+export const proposalStatus = pgEnum("proposal_status", ["proposed", "interested", "rejected"]);
+
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    propertyId: uuid("property_id")
+      .notNull()
+      .references(() => properties.id, { onDelete: "cascade" }),
+    status: proposalStatus("status").notNull().default("proposed"),
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("proposals_pair_uq").on(t.customerId, t.propertyId),
+    index("proposals_property_idx").on(t.propertyId),
+  ],
+);
+
+export type Proposal = typeof proposals.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
 export type Customer = typeof customers.$inferSelect;

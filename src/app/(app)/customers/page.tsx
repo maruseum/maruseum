@@ -135,7 +135,7 @@ export default async function CustomersPage({ searchParams }: PageProps<"/custom
                 <Td>
                   {c.lastContactedAt ? (
                     <span className={days !== null && days >= 30 ? "text-red-600" : ""}>
-                      {formatDate(c.lastContactedAt)} ({days}일 전)
+                      {formatDate(c.lastContactedAt)} ({days === 0 ? "오늘" : `${days}일 전`})
                     </span>
                   ) : (
                     <span className="text-slate-400">없음</span>

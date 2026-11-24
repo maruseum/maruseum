@@ -10,12 +10,12 @@ import { requireUser, type CurrentUser } from "@/lib/auth/dal";
 import { canReassign } from "@/lib/authz";
 import { parseSeoulDateTime } from "@/lib/format";
 import { FormError, handleForm, oneOf, required, str, type ActionState } from "@/lib/form";
-import { CUSTOMER_STAGE_LABEL, CUSTOMER_TYPE_LABEL, INTERACTION_KIND_LABEL } from "@/lib/labels";
+import { changeStage, STAGES } from "@/lib/customer-store";
+import { CUSTOMER_TYPE_LABEL, INTERACTION_KIND_LABEL } from "@/lib/labels";
 import { isEmptyNeeds, parseNeedsForm } from "@/lib/needs";
 import { saveNeedsVersion } from "@/lib/needs-store";
 import { getCustomerFor } from "@/lib/queries";
 
-const STAGES = Object.keys(CUSTOMER_STAGE_LABEL) as (keyof typeof CUSTOMER_STAGE_LABEL)[];
 const TYPES = Object.keys(CUSTOMER_TYPE_LABEL) as (keyof typeof CUSTOMER_TYPE_LABEL)[];
 const KINDS = Object.keys(INTERACTION_KIND_LABEL) as (keyof typeof INTERACTION_KIND_LABEL)[];
 
@@ -87,24 +87,22 @@ export async function updateStage(id: string, _: ActionState, fd: FormData): Pro
   return handleForm(async () => {
     const { customer } = await loadOrFail(user, id);
     const stage = oneOf(str(fd, "stage"), STAGES, "진행 단계");
-    if (stage === customer.stage) return { ok: "변경 없음", at: Date.now() };
-    await db.update(customers).set({ stage, updatedAt: new Date() }).where(eq(customers.id, id));
-    await db.insert(interactions).values({
-      customerId: id,
-      userId: user.id,
-      kind: "memo",
-      title: `진행 단계 변경: ${CUSTOMER_STAGE_LABEL[customer.stage]} → ${CUSTOMER_STAGE_LABEL[stage]}`,
-    });
-    await audit({
-      userId: user.id,
-      action: "stage_change",
-      entityType: "customer",
-      entityId: id,
-      detail: { from: customer.stage, to: stage },
-    });
+    if (!(await changeStage(user.id, customer, stage))) return { ok: "변경 없음", at: Date.now() };
     revalidatePath(`/customers/${id}`);
     return { ok: "단계를 변경했습니다.", at: Date.now() };
   });
+}
+
+/** 칸반 보드에서 카드를 옮길 때. 성공하면 null, 실패하면 오류 문구 */
+export async function moveStage(id: string, stage: string): Promise<string | null> {
+  const user = await requireUser();
+  const row = await getCustomerFor(user, id);
+  if (!row) return "고객을 찾을 수 없거나 권한이 없습니다.";
+  if (!(STAGES as string[]).includes(stage)) return "진행 단계 값이 올바르지 않습니다.";
+  await changeStage(user.id, row.customer, stage as (typeof STAGES)[number]);
+  revalidatePath("/customers/board");
+  revalidatePath(`/customers/${id}`);
+  return null;
 }
 
 export async function updateNeeds(id: string, _: ActionState, fd: FormData): Promise<ActionState> {

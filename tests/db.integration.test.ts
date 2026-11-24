@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { db, pool } from "@/db";
-import { customerNeeds, customers, teams, users } from "@/db/schema";
+import { customerNeeds, customers, properties, proposals, teams, users } from "@/db/schema";
 import { canViewCustomer, customerScope, type Actor } from "@/lib/authz";
+import { commitImport, previewImport } from "@/lib/import/preview";
+import { matchesForCustomer, matchesForProperty } from "@/lib/match-queries";
 import { saveNeedsVersion } from "@/lib/needs-store";
 import type { NeedsSnapshot } from "@/lib/needs";
 
@@ -96,6 +98,76 @@ describe.runIf(hasDb)("DB 통합", () => {
       { version: 1, reason: "최초" },
       { version: 2, reason: "확대" },
     ]);
+  });
+
+  it("엑셀 가져오기: 기존·파일 내 중복을 찾고, 중복은 건너뛰고 저장", async () => {
+    await db.insert(customers).values({ name: "기존고객", phone: "010-1111-2222", assigneeId: actors.agentA.id });
+    const staff = [{ id: actors.agentA.id, name: "a" }];
+    const input = {
+      kind: "customers" as const,
+      headers: ["이름", "연락처", "희망지역", "예산"],
+      rows: [
+        ["새고객1", "01011112222", "경기 화성", "30억~50억"], // DB 중복 (연락처)
+        ["새고객2", "010-3333-4444", "경기 평택", "40억"],
+        ["새고객3", "010 3333 4444", "", ""], // 파일 내 중복
+        ["", "010-5555-6666", "", ""], // 오류: 이름 없음
+      ],
+      headerRow: 1,
+      mapping: { name: 0, phone: 1, regions: 2, budget: 3 },
+    };
+    const p = await previewImport(actors.agentA, staff, input);
+    expect(p.total).toBe(4);
+    expect(p.errors.map((e) => e.row)).toEqual([5]);
+    expect(p.duplicates.map((d) => [d.row, d.reason])).toEqual([
+      [2, "같은 연락처의 고객이 이미 있습니다"],
+      [4, "3행과 연락처가 같습니다"],
+    ]);
+    expect(p.ready).toBe(1);
+
+    const res = await commitImport(actors.agentA, staff, input, true);
+    expect(res).toEqual({ inserted: 1, skippedDuplicates: 2, errorRows: 1 });
+
+    const [c] = await db.select().from(customers).where(eq(customers.name, "새고객2"));
+    expect(c.assigneeId).toBe(actors.agentA.id); // 직원은 본인 담당으로 고정
+    const needs = await db.select().from(customerNeeds).where(eq(customerNeeds.customerId, c.id));
+    expect(needs).toHaveLength(1);
+    expect(needs[0]).toMatchObject({ version: 1, source: "import", regions: ["경기 평택"], budgetMax: 400000 });
+  });
+
+  it("물건 가져오기: 공백만 다른 지번 주소는 중복", async () => {
+    await db.insert(properties).values({ title: "기존", propertyType: "land", address: "경기도 화성시 장안면 ○○리 1" });
+    const input = {
+      kind: "properties" as const,
+      headers: ["주소", "희망가"],
+      rows: [["경기도 화성시  장안면 ○○리 1", "45억"], ["경기도 평택시 포승읍 ○○리 2", "52억"]],
+      headerRow: 1,
+      mapping: { address: 0, askingPrice: 1 },
+    };
+    const res = await commitImport(actors.admin, [], input, true);
+    expect(res).toEqual({ inserted: 1, skippedDuplicates: 1, errorRows: 0 });
+    const [p] = await db.select().from(properties).where(eq(properties.address, "경기도 평택시 포승읍 ○○리 2"));
+    expect(p).toMatchObject({ region: "경기 평택시", askingPrice: 520000, createdBy: actors.admin.id });
+  });
+
+  it("매칭: 맞는 물건을 점수순으로, 거절한 물건은 제외", async () => {
+    const [c] = await db.select().from(customers).where(eq(customers.name, "새고객2")); // 니즈: 경기 평택, 40억 이하
+    const needs = { ...empty, regions: ["경기 평택"], budgetMax: 400000 };
+    const [cheap] = await db
+      .insert(properties)
+      .values({ title: "평택 싼 물건", propertyType: "land", address: "경기도 평택시 ○○리 3", region: "경기 평택시", askingPrice: 350000 })
+      .returning();
+
+    let matches = await matchesForCustomer(c.id, needs);
+    // 52억 물건은 예산 30% 초과로 제외, 35억 물건만
+    expect(matches.map((m) => [m.property.title, m.result.score])).toEqual([["평택 싼 물건", 100]]);
+
+    await db.insert(proposals).values({ customerId: c.id, propertyId: cheap.id, status: "rejected" });
+    matches = await matchesForCustomer(c.id, needs);
+    expect(matches).toHaveLength(0);
+
+    // 물건 쪽에서 보면: 직원B 는 직원A 고객을 볼 수 없음
+    const fromB = await matchesForProperty(actors.agentB, { ...cheap });
+    expect(fromB.find((m) => m.customer.id === c.id)).toBeUndefined();
   });
 
   it("동시에 저장해도 버전 번호가 겹치지 않는다", async () => {

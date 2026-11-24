@@ -5,7 +5,9 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { customers, interactions, properties, tasks, users } from "@/db/schema";
 import { ActionForm } from "@/components/action-form";
+import { CustomerMatchList } from "@/components/match-list";
 import { TaskList } from "@/components/task-list";
+import { matchesForProperty } from "@/lib/match-queries";
 import { Badge, ButtonLink, Card, DescList, Empty, Field, Input, PageHeader, Select } from "@/components/ui";
 import { requireUser } from "@/lib/auth/dal";
 import { canEditProperty, customerScope } from "@/lib/authz";
@@ -28,7 +30,7 @@ export default async function PropertyDetailPage({ params }: PageProps<"/propert
   if (!row) notFound();
   const p = row.p;
 
-  const [log, taskRows, staff] = await Promise.all([
+  const [log, taskRows, staff, matches] = await Promise.all([
     // 이 물건이 언급된 상담 기록 (내가 볼 수 있는 고객 것만)
     db
       .select({ i: interactions, customerName: customers.name, userName: users.name })
@@ -52,6 +54,7 @@ export default async function PropertyDetailPage({ params }: PageProps<"/propert
       .where(sql`${tasks.propertyId} = ${id} and ${tasks.status} <> 'canceled'`)
       .orderBy(asc(tasks.status), sql`${tasks.dueAt} asc nulls last`),
     listStaff(),
+    p.status === "available" || p.status === "negotiating" ? matchesForProperty(user, p) : Promise.resolve(null),
   ]);
 
   const editable = canEditProperty(user, p);
@@ -90,6 +93,14 @@ export default async function PropertyDetailPage({ params }: PageProps<"/propert
               ]}
             />
             {p.description && <p className="mt-4 whitespace-pre-wrap rounded bg-slate-50 p-3 text-sm text-slate-700">{p.description}</p>}
+          </Card>
+
+          <Card title="맞는 고객" actions={<span className="text-xs text-slate-500">고객 최신 니즈 기준 · 거절한 고객 제외</span>}>
+            {matches ? (
+              <CustomerMatchList propertyId={id} matches={matches} />
+            ) : (
+              <Empty>진행중·협상중 물건만 매칭합니다.</Empty>
+            )}
           </Card>
 
           <Card title="이 물건 관련 상담 기록">

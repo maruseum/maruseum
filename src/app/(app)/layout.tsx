@@ -9,8 +9,11 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const items: NavItem[] = [
     { href: "/", label: "대시보드" },
     { href: "/customers", label: "고객" },
+    { href: "/customers/board", label: "파이프라인" },
     { href: "/properties", label: "물건" },
+    { href: "/matching", label: "매칭" },
     { href: "/tasks", label: "할 일" },
+    { href: "/import", label: "엑셀 가져오기" },
   ];
   if (user.role === "admin") {
     items.push({ href: "/admin/users", label: "직원 관리" }, { href: "/admin/audit", label: "감사 로그" });

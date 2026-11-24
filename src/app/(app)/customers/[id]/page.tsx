@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { interactions, properties, tasks, users } from "@/db/schema";
 import { ActionForm } from "@/components/action-form";
 import { NeedsFields } from "@/components/forms";
+import { PropertyMatchList } from "@/components/match-list";
+import { matchesForCustomer } from "@/lib/match-queries";
 import { TaskList } from "@/components/task-list";
 import { Badge, ButtonLink, Card, DescList, Empty, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { audit } from "@/lib/audit";
@@ -73,6 +75,7 @@ export default async function CustomerDetailPage({ params }: PageProps<"/custome
 
   const current = history[0]?.needs ?? null;
   const snapshots = history.map((h) => toSnapshot(h.needs));
+  const matches = current ? await matchesForCustomer(id, snapshots[0]) : [];
 
   return (
     <>
@@ -117,6 +120,17 @@ export default async function CustomerDetailPage({ params }: PageProps<"/custome
                 </ActionForm>
               </div>
             </details>
+          </Card>
+
+          <Card
+            title="추천 물건"
+            actions={<span className="text-xs text-slate-500">현재 니즈 기준 · 진행·협상 중 물건 · 거절한 물건 제외</span>}
+          >
+            {current ? (
+              <PropertyMatchList customerId={id} matches={matches} />
+            ) : (
+              <Empty>니즈를 입력하면 맞는 물건을 자동으로 찾아 줍니다.</Empty>
+            )}
           </Card>
 
           <Card title="니즈 변화 이력">

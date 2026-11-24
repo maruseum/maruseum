@@ -17,6 +17,9 @@ const ACTION_LABEL: Record<string, string> = {
   task_done: "할 일 완료",
   task_open: "할 일 재개",
   task_canceled: "할 일 취소",
+  propose: "물건 제안",
+  proposal_status: "제안 반응",
+  import: "엑셀 가져오기",
 };
 
 const ENTITY_LABEL: Record<string, string> = {

@@ -10,17 +10,20 @@ import { canEditProperty } from "@/lib/authz";
 import { parseNumberInput } from "@/lib/format";
 import { FormError, handleForm, nonNegative, oneOf, required, str, type ActionState } from "@/lib/form";
 import { PROPERTY_STATUS_LABEL, PROPERTY_TYPE_LABEL } from "@/lib/labels";
+import { regionFromAddress } from "@/lib/region";
 
 const TYPES = Object.keys(PROPERTY_TYPE_LABEL) as (keyof typeof PROPERTY_TYPE_LABEL)[];
 const STATUSES = Object.keys(PROPERTY_STATUS_LABEL) as (keyof typeof PROPERTY_STATUS_LABEL)[];
 
 function readProperty(fd: FormData) {
+  const address = required(fd, "address", "지번 주소");
   return {
     title: required(fd, "title", "물건명"),
     propertyType: oneOf(str(fd, "propertyType"), TYPES, "물건 종류"),
     status: oneOf(str(fd, "status") ?? "available", STATUSES, "상태"),
-    region: str(fd, "region"),
-    address: required(fd, "address", "지번 주소"),
+    // 지역을 비워 두면 지번 주소에서 "시도 시군구" 를 채웁니다 (매칭에 사용)
+    region: str(fd, "region") ?? regionFromAddress(address),
+    address,
     roadAddress: str(fd, "roadAddress"),
     landCategory: str(fd, "landCategory"),
     zoning: str(fd, "zoning"),
